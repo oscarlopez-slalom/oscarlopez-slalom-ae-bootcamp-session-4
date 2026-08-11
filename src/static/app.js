@@ -3,6 +3,39 @@ document.addEventListener("DOMContentLoaded", () => {
   const capabilitySelect = document.getElementById("capability");
   const registerForm = document.getElementById("register-form");
   const messageDiv = document.getElementById("message");
+  const authButton = document.getElementById("auth-button");
+  const logoutButton = document.getElementById("logout-button");
+  const currentUser = document.getElementById("current-user");
+  const loginDialog = document.getElementById("login-dialog");
+  const loginForm = document.getElementById("login-form");
+  const loginError = document.getElementById("login-error");
+  let session = { authenticated: false };
+
+  function canManage(practiceArea) {
+    return (
+      session.authenticated &&
+      session.role === "practice_lead" &&
+      session.practice_areas.includes(practiceArea)
+    );
+  }
+
+  function renderSession() {
+    authButton.classList.toggle("hidden", session.authenticated);
+    logoutButton.classList.toggle("hidden", !session.authenticated);
+    currentUser.classList.toggle("hidden", !session.authenticated);
+    currentUser.textContent = session.authenticated ? session.display_name : "";
+  }
+
+  async function fetchSession() {
+    try {
+      const response = await fetch("/auth/session");
+      session = await response.json();
+    } catch (error) {
+      session = { authenticated: false };
+      console.error("Error fetching session:", error);
+    }
+    renderSession();
+  }
 
   // Function to fetch capabilities from API
   async function fetchCapabilities() {
@@ -12,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       capabilitiesList.innerHTML = "";
+      capabilitySelect.innerHTML = '<option value="">-- Select a capability --</option>';
 
       // Populate capabilities list
       Object.entries(capabilities).forEach(([name, details]) => {
@@ -21,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const availableCapacity = details.capacity || 0;
         const currentConsultants = details.consultants ? details.consultants.length : 0;
 
-        // Create consultants HTML with delete icons
+        // Create consultants HTML with scoped management controls
         const consultantsHTML =
           details.consultants && details.consultants.length > 0
             ? `<div class="consultants-section">
@@ -30,7 +64,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.consultants
                   .map(
                     (email) =>
-                      `<li><span class="consultant-email">${email}</span><button class="delete-btn" data-capability="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="consultant-email">${email}</span>${
+                        canManage(details.practice_area)
+                          ? `<button class="delete-btn" aria-label="Unregister ${email}" title="Unregister consultant" data-capability="${name}" data-email="${email}">&times;</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -71,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
-    const button = event.target;
+    const button = event.currentTarget;
     const capability = button.getAttribute("data-capability");
     const email = button.getAttribute("data-email");
 
@@ -96,6 +134,11 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
+        if (response.status === 401) {
+          session = { authenticated: false };
+          renderSession();
+          loginDialog.showModal();
+        }
       }
 
       messageDiv.classList.remove("hidden");
@@ -157,6 +200,50 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  authButton.addEventListener("click", () => {
+    loginError.classList.add("hidden");
+    loginDialog.showModal();
+    document.getElementById("username").focus();
+  });
+
+  document.getElementById("close-login").addEventListener("click", () => {
+    loginDialog.close();
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    loginError.classList.add("hidden");
+
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+      }),
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      loginError.textContent = result.detail || "Unable to sign in";
+      loginError.classList.remove("hidden");
+      return;
+    }
+
+    session = { authenticated: true, ...result };
+    loginForm.reset();
+    loginDialog.close();
+    renderSession();
+    fetchCapabilities();
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST" });
+    session = { authenticated: false };
+    renderSession();
+    fetchCapabilities();
+  });
+
   // Initialize app
-  fetchCapabilities();
+  fetchSession().then(fetchCapabilities);
 });
