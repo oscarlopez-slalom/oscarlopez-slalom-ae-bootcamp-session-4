@@ -1,0 +1,8 @@
+[
+  {
+    "username": "technology.lead",
+    "display_name": "Technology Practice Lead",
+    "password_hash_env": "TECHNOLOGY_LEAD_PASSWORD_HASH",
+    "practice_areas": ["Technology"]
+  }
+]
